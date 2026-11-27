@@ -18,9 +18,9 @@ bash /root/po0-tools/collect-target.sh
 
 ## 2. 中转机：制作镜像
 
-把本仓库文件放到 `/root/po0-official/ram-scripts/`，然后执行：
-
 ```bash
+mkdir -p /root/po0-official
+git clone git@github.com:BFNOC/po0-ram-dd.git /root/po0-official/ram-scripts
 cd /root/po0-official
 wget https://cloud.debian.org/images/cloud/trixie/latest/debian-13-genericcloud-amd64.qcow2
 wget https://cloud.debian.org/images/cloud/trixie/latest/SHA512SUMS
