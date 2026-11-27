@@ -14,8 +14,11 @@ docker build --target configs -t po0-dd-validation:local -f tests/Dockerfile tes
 docker build --target ram -t po0-dd-ram-validation:local -f tests/Dockerfile tests
 docker run --rm --cap-add=NET_ADMIN -v "$PWD:/work:ro" po0-dd-validation:local python3 /work/tests/check-configs.py
 docker run --rm -v "$PWD:/work:ro" po0-dd-validation:local python3 /work/tests/check-preparation.py
+docker run --rm -v "$PWD:/work:ro" po0-dd-validation:local python3 /work/tests/check-image-variants.py
 docker run --rm -v "$PWD:/work:ro" po0-dd-validation:local bash -c 'cd /work; shellcheck -S warning -x prepare-image.sh common.sh collect-target.sh bundle-for-po0.sh build-ram-initrd.sh stage-ram-boot.sh arm-dd.sh ram-init.sh'
 ```
+
+镜像选择检查执行实际 `prepare-image.sh`，使用合成文件验证默认 `genericcloud`、显式 `generic`、原有位置参数、错误参数、缺失镜像及选中镜像的 SHA512 校验；在首次 APT 操作处停止，不安装包、不挂载或写盘。内核检查使用临时文件和模拟包状态，验证类型匹配及对应 initramfs；不代表两种官方镜像均已重新完成在线制作与实机引导。
 
 QEMU 检查会在临时目录创建两个合成磁盘镜像，只写这些文件；新磁盘内放置证明文件，用于确认写盘后是新文件系统。测试不会下载或使用用户的实际系统镜像。
 

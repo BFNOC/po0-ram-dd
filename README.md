@@ -2,6 +2,8 @@
 
 在可联网的 Debian 13 中转机上，校验并定制 Debian 官方 cloud image，移除 cloud-init 和云镜像辅助工具；目标机把镜像放入 RAM 后，离线写盘、校验和扩容。
 
+默认使用带 `cloud-amd64` 内核的 `genericcloud` 镜像；可用 `--variant generic` 选择驱动覆盖更广的普通 `amd64` 内核。
+
 本版本先从目标机导出配置，读取 hostname、MAC、SSH 端口、root 公钥、系统盘、根分区 UUID、IPv4 和网关。源码没有实际机器的固定配置。制作出的 **prepared 目录仍是这一台机器的私有制品**，不是通用克隆镜像。
 
 ## 支持范围
@@ -36,30 +38,46 @@ bash /root/po0-tools/collect-target.sh /root/po0-target
 
 ## 2. 在中转机准备官方镜像
 
-在中转机 `/root/po0-official/` 保留从 [Debian 官方 cloud images](https://cloud.debian.org/images/cloud/trixie/latest/) 获取的：
+先选择要使用的镜像，从 [Debian 官方 cloud images](https://cloud.debian.org/images/cloud/trixie/latest/) 下载到中转机 `/root/po0-official/`：
 
-- `debian-13-generic-amd64.qcow2`
-- 同批次的 `SHA512SUMS`
+| 选择 | 需要下载的镜像 | 内核更新跟踪包 |
+| --- | --- | --- |
+| `genericcloud`（默认） | `debian-13-genericcloud-amd64.qcow2` | `linux-image-cloud-amd64` |
+| `generic` | `debian-13-generic-amd64.qcow2` | `linux-image-amd64` |
+
+同时下载与所选镜像同批次的 `SHA512SUMS`。只需下载打算使用的那一种镜像。`genericcloud` 裁剪了部分硬件驱动，需要更广硬件支持时选择 `generic`；两者都会移除 cloud-init。
 
 原始文件可复用。脚本按 SHA512SUMS 校验下载内容；这里依赖你通过官方 HTTPS 获取校验文件，并没有另行验证 OpenPGP 签名。准备过程不会修改原始 qcow2。
 
 将完整源码放到 `/root/po0-official/ram-scripts/`。也可在 `/root/po0-official/` 解压本项目提供的 `po0-ram-scripts.tar.gz`，目录结构相同。
 
+默认使用 cloud 内核：
+
 ```bash
 bash /root/po0-official/ram-scripts/prepare-image.sh
 ```
 
-默认读取 `/root/po0-official/target/`；如需其他位置，传入采集结果目录：
+选择普通内核：
+
+```bash
+bash /root/po0-official/ram-scripts/prepare-image.sh --variant generic
+```
+
+也可显式传入 `--variant genericcloud`。所选镜像缺失时立即停止，不会自动改用另一种镜像。
+
+默认读取 `/root/po0-official/target/`；原有的采集目录位置参数仍可使用，也可与镜像选项组合：
 
 ```bash
 bash /root/po0-official/ram-scripts/prepare-image.sh /root/my-target-profile
+bash /root/po0-official/ram-scripts/prepare-image.sh --variant generic /root/my-target-profile
+bash /root/po0-official/ram-scripts/prepare-image.sh --help
 ```
 
 输出是 `/root/po0-official/prepared/`。目录已存在时拒绝覆盖；换机器制作前，应自行归档旧目录。脚本使用 raw 工作副本及 loop 设备，不写入中转机的系统盘。
 
 此文件是 qcow2 格式，必须先转换为 raw。扩展名不会让 qcow2 的容器数据自动变成可引导的磁盘内容。
 
-镜像会保留官方基础系统和内核，并作以下定制：
+镜像会保留官方基础系统，安装/保留所选内核的更新跟踪包并校验内核与 initramfs，并作以下定制：
 
 - 移除 cloud-init、cloud 辅助工具、netplan 和 qemu-guest-agent；不添加厂商源、探针或业务服务。
 - 使用 Debian 官方软件源，安装/保留 SSH、systemd-resolved、nftables、vim、curl、wget、unzip、ca-certificates 及必要系统组件，不执行 `autoremove`。
@@ -88,6 +106,8 @@ bash /root/po0-official-dd/stage-ram-boot.sh
 ```
 
 暂存会核对镜像与目标的 hostname、MAC、SSH 端口及公钥，并重新检测当前系统盘、UUID、地址和路由。随后使用当前内核构建 RAM initramfs，再解包检查必要工具和 SSH 配置。此命令不改 GRUB、不重启。
+
+RAM 环境沿用目标机当前运行的内核，与新系统选择的 `--variant` 无关。新内核随准备好的镜像写入，最终重启后生效。
 
 成功看到 `RAM files are ready` 后，再执行：
 
@@ -134,6 +154,8 @@ systemctl is-active ssh systemd-networkd systemd-resolved nftables
 
 成品镜像会恢复制作时的软件和配置快照，包含当时的登录公钥及 SSH 主机私钥。公网 IP/租约变化本身不要求重做镜像；MAC、hostname、SSH 端口或公钥变化需要重新制作。不要将同一成品镜像直接复制给不同机器，也不要公开发布它。
 
+默认改为 `genericcloud` 只影响新制作的镜像。已生成的 `prepared/` 仍保留原来的内核，并可按原流程使用；新版没有更改配置或制品格式。需要换内核时，从对应官方镜像重新制作，脚本不会覆盖旧 `prepared/`，也不会在线切换当前目标机内核。原来只下载了 `generic` 镜像的用户，现在应显式传入 `--variant generic`。
+
 ## Git 和隐私
 
 可公开的是源码。`.gitignore` 排除了镜像、压缩包、prepared/、target/、采集 JSON、公钥文件、私钥、运行日志及引导元数据。忽略规则不能清除已经提交的历史，也不能防止 `git add -f`。
@@ -144,4 +166,4 @@ systemctl is-active ssh systemd-networkd systemd-resolved nftables
 
 此前专用版已由用户在真实 Po0 成功验证：官方 Debian 13 启动、整盘写入和读回校验、GPT/ext4 扩容、公钥 SSH、网络与 nftables。通用版是在该流程基础上改为采集配置；它没有再次在用户的真实机器上重装。
 
-本版本的自动检查见 [tests/README.md](tests/README.md)：配置采集和拒绝条件、同机镜像复用、实际 SSH 登录、nftables 解析、DNS 文件权限、APT 失败停止，以及 QEMU 中的离线写盘/扩容和写前校验失败恢复。测试只覆盖说明的布局，并非所有云厂商和硬件的成功保证。
+本版本的自动检查见 [tests/README.md](tests/README.md)：默认/显式镜像选择及所选文件的校验、内核类型检查、配置采集和拒绝条件、同机镜像复用、实际 SSH 登录、nftables 解析、DNS 文件权限、APT 失败停止，以及 QEMU 中的离线写盘/扩容和写前校验失败恢复。测试只覆盖说明的布局，并非所有云厂商和硬件的成功保证。

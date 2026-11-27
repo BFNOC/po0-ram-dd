@@ -9,27 +9,85 @@ SOURCE=$(cd -- "$(dirname -- "$0")" && pwd -P)
 die() { printf 'ERROR: %s\n' "$*" >&2; exit 1; }
 log() { printf '\n==> %s\n' "$*"; }
 
+usage() {
+    cat <<'EOF'
+Usage: bash prepare-image.sh [--variant genericcloud|generic] [PROFILE_DIR]
+
+  --variant genericcloud  Official genericcloud image / cloud-amd64 kernel (default)
+  --variant generic       Official generic image / amd64 kernel
+  PROFILE_DIR             Collected target directory (default: /root/po0-official/target)
+  -h, --help              Show this help without changing the system
+
+Download the selected official qcow2 and its matching SHA512SUMS first.
+Both variants remove cloud-init. Existing prepared images are not changed.
+EOF
+}
+
+BASE=/root/po0-official
+IMAGE_VARIANT=genericcloud
+PROFILE_DIR=$BASE/target
+variant_set=0
+profile_set=0
+while (( $# )); do
+    case "$1" in
+        --variant|--variant=*)
+            (( variant_set == 0 )) || die 'Specify --variant only once.'
+            variant_set=1
+            if [[ $1 == --variant ]]; then
+                (( $# >= 2 )) || die '--variant requires genericcloud or generic.'
+                IMAGE_VARIANT=$2
+                shift 2
+            else
+                IMAGE_VARIANT=${1#--variant=}
+                shift
+            fi
+            ;;
+        -h|--help) usage; exit 0 ;;
+        --)
+            shift
+            if (( $# )); then
+                (( $# == 1 && profile_set == 0 )) || die 'Specify only one target profile directory.'
+                PROFILE_DIR=$1
+            fi
+            break
+            ;;
+        -*) die "Unknown option: $1; use --help." ;;
+        *)
+            (( profile_set == 0 )) || die 'Specify only one target profile directory.'
+            profile_set=1
+            PROFILE_DIR=$1
+            shift
+            ;;
+    esac
+done
+case "$IMAGE_VARIANT" in
+    genericcloud) KERNEL_PACKAGE=linux-image-cloud-amd64 ;;
+    generic) KERNEL_PACKAGE=linux-image-amd64 ;;
+    *) die 'Unsupported variant; choose genericcloud or generic.' ;;
+esac
+IMAGE_NAME=debian-13-$IMAGE_VARIANT-amd64.qcow2
+IMAGE=$BASE/$IMAGE_NAME
+
 [[ $EUID == 0 ]] || die 'Run this script as root on the relay VPS.'
 [[ $(uname -m) == x86_64 ]] || die 'The relay must be x86_64.'
 . /etc/os-release
 [[ ${ID:-} == debian && ${VERSION_ID:-} == 13 ]] || die 'This script is for the Debian 13 relay.'
 
-BASE=/root/po0-official
-IMAGE=$BASE/debian-13-generic-amd64.qcow2
-PROFILE_DIR=${1:-$BASE/target}
 PROFILE_DIR=$(readlink -f -- "$PROFILE_DIR")
 KEYS=$PROFILE_DIR/po0-authorized_keys
 PROFILE=$PROFILE_DIR/target-profile.json
 load_profile "$PROFILE"
-[[ -s $IMAGE && -s $BASE/SHA512SUMS ]] || die 'Missing the downloaded official image or SHA512SUMS.'
+[[ -s $IMAGE ]] || die "Missing $IMAGE; download the selected official image (see --help)."
+[[ -s $BASE/SHA512SUMS ]] || die 'Missing the official SHA512SUMS for the selected image.'
 [[ -s $KEYS ]] || die 'Missing the public keys collected from the target.'
 [[ $(sha256sum "$KEYS" | awk '{print $1}') == "$P_KEYS_SHA256" ]] || die 'Public keys do not match the target profile.'
 KEYS=$(readlink -f -- "$KEYS")
 [[ ! -e $BASE/prepared ]] || die 'The prepared directory already exists; inspect it before preparing another image.'
 
+log "Selected image: $IMAGE_NAME; kernel track: $KERNEL_PACKAGE"
 log 'Verify the original official image'
 cd "$BASE"
-awk '$2 == "debian-13-generic-amd64.qcow2" || $2 == "*debian-13-generic-amd64.qcow2" {print; found++} END {if (found != 1) exit 1}' \
+awk -v image="$IMAGE_NAME" '$2 == image || $2 == "*" image {print; found++} END {if (found != 1) exit 1}' \
     SHA512SUMS > .selected-SHA512SUMS
 sha512sum -c .selected-SHA512SUMS
 rm .selected-SHA512SUMS
@@ -130,7 +188,7 @@ if (( ${#purge_packages[@]} )); then
     chroot "$ROOT" env DEBIAN_FRONTEND=noninteractive apt-get -y purge "${purge_packages[@]}"
 fi
 chroot "$ROOT" env DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-    openssh-server systemd-resolved nftables vim curl wget unzip ca-certificates
+    openssh-server systemd-resolved nftables vim curl wget unzip ca-certificates "$KERNEL_PACKAGE"
 # No autoremove: kernel, bootloader and networking dependencies must be retained.
 chroot "$ROOT" apt-get clean
 rm -f "$ROOT/usr/sbin/policy-rc.d"
@@ -162,8 +220,21 @@ done
 for path in usr/sbin/sshd usr/sbin/nft usr/lib/systemd/systemd-networkd usr/sbin/resize2fs; do
     [[ -x $ROOT/$path ]] || die "Missing required executable: $path"
 done
-compgen -G "$ROOT/boot/vmlinuz-*" >/dev/null || die 'The image has no kernel.'
-compgen -G "$ROOT/boot/initrd.img-*" >/dev/null || die 'The image has no initramfs.'
+[[ $(chroot "$ROOT" dpkg-query -W -f='${db:Status-Status}' "$KERNEL_PACKAGE") == installed ]] || die 'Selected kernel metapackage is missing.'
+kernel_found=0
+for kernel_image in "$ROOT"/boot/vmlinuz-*; do
+    [[ -s $kernel_image ]] || continue
+    kernel_version=${kernel_image##*/vmlinuz-}
+    case "$kernel_version" in
+        *-cloud-amd64) kernel_variant=genericcloud ;;
+        *-amd64) kernel_variant=generic ;;
+        *) die "Unexpected kernel architecture: $kernel_version" ;;
+    esac
+    [[ $kernel_variant == "$IMAGE_VARIANT" ]] || die "Kernel does not match --variant $IMAGE_VARIANT: $kernel_version"
+    [[ -s $ROOT/boot/initrd.img-$kernel_version ]] || die "Missing initramfs for $kernel_version"
+    kernel_found=1
+done
+(( kernel_found )) || die 'The image has no kernel.'
 chroot "$ROOT" /usr/sbin/sshd -T | awk '/^(port|permitrootlogin|passwordauthentication|pubkeyauthentication) /'
 chroot "$ROOT" ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub
 cp "$ROOT/etc/ssh/ssh_host_ed25519_key.pub" "$WORK/SSH_HOST_ED25519.pub"
