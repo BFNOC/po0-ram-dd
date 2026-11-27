@@ -48,4 +48,4 @@ bash stage-ram-boot.sh && bash arm-dd.sh && reboot
 
 镜像含 SSH 主机私钥，采集配置和 `prepared/` 目录请私下保存，不要公开上传。
 
-[详细限制、故障处理与镜像复用](docs/details.md) · [测试说明](tests/README.md) · [上游参考](UPSTREAM.md)
+[详细限制、故障处理与镜像复用](docs/details.md) · [测试说明](tests/README.md) · [上游参考](UPSTREAM.md) · [多发行版调研](docs/distro-research.md)

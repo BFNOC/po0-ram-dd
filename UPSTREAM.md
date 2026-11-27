@@ -16,3 +16,9 @@ upstream 的安装阶段有 `apk add` 等联网步骤；这里不执行那些步
 最终写入之前制作的官方 Debian 镜像，保持该镜像已经去除的 cloud-init 和厂商源设置。
 
 附带 upstream 的 GPL v3 `LICENSE`。这些可修改的脚本源码随包提供。
+
+## 其他参考
+
+[多发行版调研](docs/distro-research.md) 记录了 bin456789/reinstall、
+leitbogioro/Tools 和 Unny984/po0-reinstall，以及上述直接上游的调研版本、
+支持范围和适配判断。列为参考不代表已复制其实现，也不扩展本项目的支持范围。
