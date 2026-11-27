@@ -20,7 +20,7 @@ bash /root/po0-tools/collect-target.sh
 
 ```bash
 mkdir -p /root/po0-official
-git clone git@github.com:BFNOC/po0-ram-dd.git /root/po0-official/ram-scripts
+git clone https://github.com/BFNOC/po0-ram-dd.git /root/po0-official/ram-scripts
 cd /root/po0-official
 wget https://cloud.debian.org/images/cloud/trixie/latest/debian-13-genericcloud-amd64.qcow2
 wget https://cloud.debian.org/images/cloud/trixie/latest/SHA512SUMS
